@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { ChainDataService } from './utils/chainData.js';
 
 const API_BASE_URL = 'https://api.everclear.org';
 
@@ -40,8 +41,17 @@ interface MetricsParams {
   chainId?: string;
 }
 
+interface ChainIdParams {
+  chainId: string;
+}
+
+interface TickerhashParams {
+  tickerhash: string;
+}
+
 class EverclearMCPServer {
   private server: Server;
+  private chainDataService: ChainDataService;
 
   constructor() {
     this.server = new Server(
@@ -56,6 +66,7 @@ class EverclearMCPServer {
       }
     );
 
+    this.chainDataService = new ChainDataService();
     this.setupToolHandlers();
   }
 
@@ -155,6 +166,46 @@ class EverclearMCPServer {
             },
           },
         },
+        {
+          name: 'convert_chain_id_to_name',
+          description: `Convert a chain ID to its human-readable name.
+          
+          WORKFLOW INSTRUCTIONS:
+          - Use this to make API responses more readable
+          - Chain IDs are numeric strings, names are like "Arbitrum", "Optimism"
+          - Returns "Unknown Chain (ID)" if chain ID not found
+          
+          DATA FORMATTING:
+          - Always use this before displaying chain information to users
+          - Combine with other tools for complete chain analysis`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              chainId: { type: 'string', description: 'The chain ID to convert' },
+            },
+            required: ['chainId'],
+          },
+        },
+        {
+          name: 'convert_tickerhash_to_name',
+          description: `Convert a tickerhash to its human-readable token name.
+          
+          WORKFLOW INSTRUCTIONS:
+          - Use this to make token information more readable
+          - Tickerhashes are long strings, names are like "USDC", "WETH"
+          - Returns "Unknown Token (hash)" if tickerhash not found
+          
+          DATA FORMATTING:
+          - Always use this before displaying token information to users
+          - Essential for route quotes and invoice analysis`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              tickerhash: { type: 'string', description: 'The tickerhash to convert' },
+            },
+            required: ['tickerhash'],
+          },
+        },
       ],
     }));
 
@@ -179,6 +230,10 @@ class EverclearMCPServer {
             return await this.getLiquidityFlow(args as unknown as MetricsParams);
           case 'get_clearing_volume':
             return await this.getClearingVolume(args as unknown as MetricsParams);
+          case 'convert_chain_id_to_name':
+            return await this.convertChainIdToName(args as unknown as ChainIdParams);
+          case 'convert_tickerhash_to_name':
+            return await this.convertTickerhashToName(args as unknown as TickerhashParams);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -321,6 +376,42 @@ class EverclearMCPServer {
         {
           type: 'text',
           text: JSON.stringify(data, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async convertChainIdToName(params: ChainIdParams) {
+    const chainName = this.chainDataService.convertChainIdToName(params.chainId);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Chain ID: ${params.chainId}
+Chain Name: ${chainName}
+
+FORMATTING INSTRUCTIONS:
+- Use this name when displaying chain information to users
+- Combine with other tools for complete chain analysis
+- Consider using get_liquidity_flow with this chain ID for metrics`,
+        },
+      ],
+    };
+  }
+
+  private async convertTickerhashToName(params: TickerhashParams) {
+    const tokenName = this.chainDataService.convertTickerhashToName(params.tickerhash);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Tickerhash: ${params.tickerhash}
+Token Name: ${tokenName}
+
+FORMATTING INSTRUCTIONS:
+- Use this name when displaying token information to users
+- Essential for route quotes and invoice analysis
+- Combine with get_route_quote for complete transfer analysis`,
         },
       ],
     };
