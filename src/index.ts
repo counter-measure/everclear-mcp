@@ -563,57 +563,44 @@ FORMATTING INSTRUCTIONS:
       })
     );
 
-    // Create table-formatted data for better display
-    const tableData = formattedInvoices.map(invoice => ({
-      'Intent ID': invoice.intent_id?.substring(0, 10) + '...' || 'N/A',
-      'Origin': invoice.origin || 'N/A',
-      'Destination': invoice.destination || 'N/A',
-      'Asset': invoice.asset || 'N/A',
-      'Amount': invoice.amount || 'N/A',
-      'Status': invoice.hub_status || 'N/A',
-      'Open Time': invoice.open_time || 'N/A',
-      'Created At': invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : 'N/A'
-    }));
-
     // Create CSV format
-    const csvHeaders = Object.keys(tableData[0] || {}).join(',');
-    const csvRows = tableData.map(row => 
-      Object.values(row).map(value => `"${value}"`).join(',')
-    );
+    const csvHeaders = 'Intent ID,Owner,Amount,Origin,Destination,Asset,Created At';
+    const csvRows = formattedInvoices.map(invoice => [
+      invoice.intent_id || 'N/A',
+      invoice.owner || 'N/A',
+      invoice.amount || 'N/A',
+      invoice.origin || 'N/A',
+      invoice.destination || 'N/A',
+      invoice.asset || 'N/A',
+      invoice.hub_invoice_enqueued_timestamp ? 
+        new Date(parseInt(invoice.hub_invoice_enqueued_timestamp) * 1000).toISOString() : 'N/A'
+    ].map(value => `"${value}"`).join(','));
     const csvData = [csvHeaders, ...csvRows].join('\n');
+
+    // Create simplified JSON with only requested fields
+    const simplifiedInvoices = formattedInvoices.map(invoice => ({
+      intent_id: invoice.intent_id,
+      owner: invoice.owner,
+      amount: invoice.amount,
+      origin: invoice.origin,
+      destinations: invoice.destinations,
+      destination: invoice.destination,
+      asset: invoice.asset,
+      createdAt: invoice.hub_invoice_enqueued_timestamp ? 
+        new Date(parseInt(invoice.hub_invoice_enqueued_timestamp) * 1000).toISOString() : null,
+      hub_invoice_enqueued_timestamp: invoice.hub_invoice_enqueued_timestamp
+    }));
 
     return {
       content: [
         {
           type: 'text',
-          text: `# Everclear Invoices Report
-
-**Total Invoices:** ${formattedInvoices.length}
-
-## Table Format
-
-| Intent ID | Origin | Destination | Asset | Amount | Status | Open Time | Created At |
-|-----------|--------|-------------|-------|--------|--------|-----------|------------|
-${tableData.map(row => 
-  `| ${row['Intent ID']} | ${row['Origin']} | ${row['Destination']} | ${row['Asset']} | ${row['Amount']} | ${row['Status']} | ${row['Open Time']} | ${row['Created At']} |`
-).join('\n')}
-
-## CSV Format
-\`\`\`csv
+          text: `\`\`\`csv
 ${csvData}
 \`\`\`
 
-## Raw JSON Data
 \`\`\`json
-${JSON.stringify({
-  invoices: formattedInvoices,
-  total: formattedInvoices.length,
-  metadata: {
-    note: "Amounts converted from wei to native token units using decimals from chain data",
-    open_time: "Time since invoice creation in seconds",
-    formatting: "Chain names and token names converted from IDs and tickerhashes"
-  }
-}, null, 2)}
+${JSON.stringify({ invoices: simplifiedInvoices }, null, 2)}
 \`\`\``,
         },
       ],
