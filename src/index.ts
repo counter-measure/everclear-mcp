@@ -563,19 +563,58 @@ FORMATTING INSTRUCTIONS:
       })
     );
 
+    // Create table-formatted data for better display
+    const tableData = formattedInvoices.map(invoice => ({
+      'Intent ID': invoice.intent_id?.substring(0, 10) + '...' || 'N/A',
+      'Origin': invoice.origin || 'N/A',
+      'Destination': invoice.destination || 'N/A',
+      'Asset': invoice.asset || 'N/A',
+      'Amount': invoice.amount || 'N/A',
+      'Status': invoice.hub_status || 'N/A',
+      'Open Time': invoice.open_time || 'N/A',
+      'Created At': invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : 'N/A'
+    }));
+
+    // Create CSV format
+    const csvHeaders = Object.keys(tableData[0] || {}).join(',');
+    const csvRows = tableData.map(row => 
+      Object.values(row).map(value => `"${value}"`).join(',')
+    );
+    const csvData = [csvHeaders, ...csvRows].join('\n');
+
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({
-            invoices: formattedInvoices,
-            total: formattedInvoices.length,
-            metadata: {
-              note: "Amounts converted from wei to native token units using decimals from chain data",
-              open_time: "Time since invoice creation in seconds",
-              formatting: "Chain names and token names converted from IDs and tickerhashes"
-            }
-          }, null, 2),
+          text: `# Everclear Invoices Report
+
+**Total Invoices:** ${formattedInvoices.length}
+
+## Table Format
+
+| Intent ID | Origin | Destination | Asset | Amount | Status | Open Time | Created At |
+|-----------|--------|-------------|-------|--------|--------|-----------|------------|
+${tableData.map(row => 
+  `| ${row['Intent ID']} | ${row['Origin']} | ${row['Destination']} | ${row['Asset']} | ${row['Amount']} | ${row['Status']} | ${row['Open Time']} | ${row['Created At']} |`
+).join('\n')}
+
+## CSV Format
+\`\`\`csv
+${csvData}
+\`\`\`
+
+## Raw JSON Data
+\`\`\`json
+${JSON.stringify({
+  invoices: formattedInvoices,
+  total: formattedInvoices.length,
+  metadata: {
+    note: "Amounts converted from wei to native token units using decimals from chain data",
+    open_time: "Time since invoice creation in seconds",
+    formatting: "Chain names and token names converted from IDs and tickerhashes"
+  }
+}, null, 2)}
+\`\`\``,
         },
       ],
     };
