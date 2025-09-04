@@ -382,7 +382,7 @@ class EverclearMCPServer {
   }
 
   private async convertChainIdToName(params: ChainIdParams) {
-    const chainName = this.chainDataService.convertChainIdToName(params.chainId);
+    const chainName = await this.chainDataService.convertChainIdToName(params.chainId);
     return {
       content: [
         {
@@ -400,7 +400,7 @@ FORMATTING INSTRUCTIONS:
   }
 
   private async convertTickerhashToName(params: TickerhashParams) {
-    const tokenName = this.chainDataService.convertTickerhashToName(params.tickerhash);
+    const tokenName = await this.chainDataService.convertTickerhashToName(params.tickerhash);
     return {
       content: [
         {
