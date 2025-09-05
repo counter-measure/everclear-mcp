@@ -14,7 +14,7 @@ async function testMCPCall() {
     params: {
       name: "get_invoices_formatted",
       arguments: {
-        limit: 3
+        limit: 20
       }
     }
   };

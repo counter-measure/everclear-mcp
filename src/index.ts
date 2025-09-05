@@ -512,7 +512,8 @@ FORMATTING INSTRUCTIONS:
             const assetInfo = await this.chainDataService.getAssetInfo(tickerHash);
             if (assetInfo) {
               assetName = assetInfo.symbol;
-              decimals = assetInfo.decimals;
+              //decimals = assetInfo.decimals;
+              decimals = 18;
             } else {
               assetName = await this.chainDataService.convertTickerhashToName(tickerHash);
             }
@@ -523,6 +524,7 @@ FORMATTING INSTRUCTIONS:
           try {
             const amountInWei = BigInt(invoice.amount || '0');
             const divisor = BigInt(10 ** decimals);
+
             amount = (Number(amountInWei) / Number(divisor)).toFixed(6);
           } catch (error) {
             console.error('Error converting amount:', error);
@@ -587,8 +589,7 @@ FORMATTING INSTRUCTIONS:
       destination: invoice.destination,
       asset: invoice.asset,
       createdAt: invoice.hub_invoice_enqueued_timestamp ? 
-        new Date(parseInt(invoice.hub_invoice_enqueued_timestamp) * 1000).toISOString() : null,
-      hub_invoice_enqueued_timestamp: invoice.hub_invoice_enqueued_timestamp
+        new Date(parseInt(invoice.hub_invoice_enqueued_timestamp) * 1000).toISOString() : null
     }));
 
     return {
