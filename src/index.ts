@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { ChainDataService } from './utils/chainData.js';
 
 const API_BASE_URL = 'https://api.everclear.org';
 
@@ -21,7 +22,7 @@ interface IntentDetailsParams {
 interface InvoiceParams {
   status?: string;
   limit?: number;
-  offset?: number;
+  // Note: API uses cursor-based pagination, not offset
 }
 
 interface InvoiceDetailsParams {
@@ -40,8 +41,17 @@ interface MetricsParams {
   chainId?: string;
 }
 
+interface ChainIdParams {
+  chainId: string;
+}
+
+interface TickerhashParams {
+  tickerhash: string;
+}
+
 class EverclearMCPServer {
   private server: Server;
+  private chainDataService: ChainDataService;
 
   constructor() {
     this.server = new Server(
@@ -56,6 +66,7 @@ class EverclearMCPServer {
       }
     );
 
+    this.chainDataService = new ChainDataService();
     this.setupToolHandlers();
   }
 
@@ -155,6 +166,61 @@ class EverclearMCPServer {
             },
           },
         },
+        {
+          name: 'convert_chain_id_to_name',
+          description: `Convert a chain ID to its human-readable name.
+          
+          WORKFLOW INSTRUCTIONS:
+          - Use this to make API responses more readable
+          - Chain IDs are numeric strings, names are like "Arbitrum", "Optimism"
+          - Returns "Unknown Chain (ID)" if chain ID not found
+          
+          DATA FORMATTING:
+          - Always use this before displaying chain information to users
+          - Combine with other tools for complete chain analysis`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              chainId: { type: 'string', description: 'The chain ID to convert' },
+            },
+            required: ['chainId'],
+          },
+        },
+        {
+          name: 'convert_tickerhash_to_name',
+          description: `Convert a tickerhash to its human-readable token name.
+          
+          WORKFLOW INSTRUCTIONS:
+          - Use this to make token information more readable
+          - Tickerhashes are long strings, names are like "USDC", "WETH"
+          - Returns "Unknown Token (hash)" if tickerhash not found
+          
+          DATA FORMATTING:
+          - Always use this before displaying token information to users
+          - Essential for route quotes and invoice analysis`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              tickerhash: { type: 'string', description: 'The tickerhash to convert' },
+            },
+            required: ['tickerhash'],
+          },
+        },
+        {
+          name: 'get_invoices_formatted',
+          description: `Get invoices from Everclear with enhanced formatting including:
+          - Human-readable chain names and token names
+          - Amounts converted from wei to native token units
+          - Open time calculation (current time - createdAt)
+          - Properly formatted data for analysis`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Number of invoices to retrieve' },
+              status: { type: 'string', description: 'Filter by invoice status' },
+            },
+          },
+        },
       ],
     }));
 
@@ -179,6 +245,12 @@ class EverclearMCPServer {
             return await this.getLiquidityFlow(args as unknown as MetricsParams);
           case 'get_clearing_volume':
             return await this.getClearingVolume(args as unknown as MetricsParams);
+          case 'convert_chain_id_to_name':
+            return await this.convertChainIdToName(args as unknown as ChainIdParams);
+          case 'convert_tickerhash_to_name':
+            return await this.convertTickerhashToName(args as unknown as TickerhashParams);
+          case 'get_invoices_formatted':
+            return await this.getInvoicesFormatted(args as unknown as InvoiceParams);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -321,6 +393,216 @@ class EverclearMCPServer {
         {
           type: 'text',
           text: JSON.stringify(data, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async convertChainIdToName(params: ChainIdParams) {
+    const chainName = await this.chainDataService.convertChainIdToName(params.chainId);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Chain ID: ${params.chainId}
+Chain Name: ${chainName}
+
+FORMATTING INSTRUCTIONS:
+- Use this name when displaying chain information to users
+- Combine with other tools for complete chain analysis
+- Consider using get_liquidity_flow with this chain ID for metrics`,
+        },
+      ],
+    };
+  }
+
+  private async convertTickerhashToName(params: TickerhashParams) {
+    const tokenName = await this.chainDataService.convertTickerhashToName(params.tickerhash);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Tickerhash: ${params.tickerhash}
+Token Name: ${tokenName}
+
+FORMATTING INSTRUCTIONS:
+- Use this name when displaying token information to users
+- Essential for route quotes and invoice analysis
+- Combine with get_route_quote for complete transfer analysis`,
+        },
+      ],
+    };
+  }
+
+  private async getInvoicesFormatted(params: InvoiceParams) {
+    const queryString = this.buildQueryString(params);
+    const rawData = await this.makeRequest(`/invoices${queryString}`);
+    
+    // Handle different response structures
+    let invoices: any[] = [];
+    
+    if (Array.isArray(rawData)) {
+      invoices = rawData;
+    } else if (rawData && typeof rawData === 'object') {
+      const dataObj = rawData as any;
+      // Check if the response has an invoices property
+      if (Array.isArray(dataObj.invoices)) {
+        invoices = dataObj.invoices;
+      } else if (Array.isArray(dataObj.data)) {
+        invoices = dataObj.data;
+      } else if (Array.isArray(dataObj.results)) {
+        invoices = dataObj.results;
+      } else {
+        // If it's an object but not an array, wrap it in an array
+        invoices = [rawData];
+      }
+    } else {
+      // If rawData is not an array or object, return empty result
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              invoices: [],
+              total: 0,
+              error: 'No invoice data found',
+              rawResponse: rawData
+            }, null, 2),
+          },
+        ],
+      };
+    }
+    
+    // Process each invoice to add formatted fields
+    const formattedInvoices = await Promise.all(
+      invoices.map(async (invoice: any) => {
+        try {
+          const currentTime = Date.now();
+          const createdAt = new Date(invoice.createdAt || Date.now()).getTime();
+          const openTime = Math.floor((currentTime - createdAt) / 1000); // seconds
+
+          // Convert chain IDs to names with fallbacks
+          const originChainName = invoice.origin ? 
+            await this.chainDataService.convertChainIdToName(invoice.origin) : 
+            'Unknown Chain';
+          
+          // Handle destinations (can be array or single value)
+          let destinationChainName = 'Unknown Chain';
+          let formattedDestinations = invoice.destinations;
+          if (invoice.destinations && Array.isArray(invoice.destinations)) {
+            const destNames = await Promise.all(
+              invoice.destinations.map((dest: any) => this.chainDataService.convertChainIdToName(dest))
+            );
+            destinationChainName = destNames.join(', ');
+            // Format destinations array with chain names
+            formattedDestinations = invoice.destinations.map((dest: any, index: number) => 
+              `${destNames[index]} (${dest})`
+            );
+          } else if (invoice.destination) {
+            destinationChainName = await this.chainDataService.convertChainIdToName(invoice.destination);
+          }
+
+          // Get asset info and convert amount with fallbacks
+          // Handle both 'asset' and 'ticker_hash' fields
+          const tickerHash = invoice.asset || invoice.ticker_hash;
+          let assetName = 'Unknown Token';
+          let decimals = 18;
+          
+          if (tickerHash) {
+            const assetInfo = await this.chainDataService.getAssetInfo(tickerHash);
+            if (assetInfo) {
+              assetName = assetInfo.symbol;
+              //decimals = assetInfo.decimals;
+              decimals = 18;
+            } else {
+              assetName = await this.chainDataService.convertTickerhashToName(tickerHash);
+            }
+          }
+          
+          // Convert amount from wei to human readable with fallbacks
+          let amount = '0.000000';
+          try {
+            const amountInWei = BigInt(invoice.amount || '0');
+            const divisor = BigInt(10 ** decimals);
+
+            amount = (Number(amountInWei) / Number(divisor)).toFixed(6);
+          } catch (error) {
+            console.error('Error converting amount:', error);
+            amount = invoice.amount || '0.000000';
+          }
+
+          return {
+            ...invoice,
+            createdAt: invoice.createdAt || new Date().toISOString(),
+            origin: `${originChainName} (${invoice.origin || 'unknown'})`,
+            destination: `${destinationChainName} (${invoice.destinations ? invoice.destinations.join(',') : invoice.destination || 'unknown'})`,
+            destinations: formattedDestinations,
+            asset: `${assetName} (${tickerHash || 'unknown'})`,
+            amount: amount,
+            open_time: `${openTime} seconds`,
+            open_time_seconds: openTime,
+            amount_raw: invoice.amount || '0',
+          };
+        } catch (error) {
+          console.error('Error processing invoice:', error);
+          // Return the original invoice with minimal formatting
+          return {
+            ...invoice,
+            createdAt: invoice.createdAt || new Date().toISOString(),
+            origin: `Unknown Chain (${invoice.origin || 'unknown'})`,
+            destination: `Unknown Chain (${invoice.destinations ? invoice.destinations.join(',') : invoice.destination || 'unknown'})`,
+            destinations: invoice.destinations ? 
+              invoice.destinations.map((dest: any) => `Unknown Chain (${dest})`) :
+              invoice.destinations,
+            asset: `Unknown Token (${invoice.asset || invoice.ticker_hash || 'unknown'})`,
+            amount: invoice.amount || '0.000000',
+            open_time: '0 seconds',
+            open_time_seconds: 0,
+            amount_raw: invoice.amount || '0',
+            processing_error: error instanceof Error ? error.message : 'Unknown error'
+          };
+        }
+      })
+    );
+
+    // Create CSV format
+    const csvHeaders = 'Intent ID,Owner,Amount,Origin,Destination,Asset,Created At';
+    const csvRows = formattedInvoices.map(invoice => [
+      invoice.intent_id || 'N/A',
+      invoice.owner || 'N/A',
+      invoice.amount || 'N/A',
+      invoice.origin || 'N/A',
+      invoice.destination || 'N/A',
+      invoice.asset || 'N/A',
+      invoice.hub_invoice_enqueued_timestamp ? 
+        new Date(parseInt(invoice.hub_invoice_enqueued_timestamp) * 1000).toISOString() : 'N/A'
+    ].map(value => `"${value}"`).join(','));
+    const csvData = [csvHeaders, ...csvRows].join('\n');
+
+    // Create simplified JSON with only requested fields
+    const simplifiedInvoices = formattedInvoices.map(invoice => ({
+      intent_id: invoice.intent_id,
+      owner: invoice.owner,
+      amount: invoice.amount,
+      origin: invoice.origin,
+      destinations: invoice.destinations,
+      destination: invoice.destination,
+      asset: invoice.asset,
+      createdAt: invoice.hub_invoice_enqueued_timestamp ? 
+        new Date(parseInt(invoice.hub_invoice_enqueued_timestamp) * 1000).toISOString() : null
+    }));
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `\`\`\`csv
+${csvData}
+\`\`\`
+
+\`\`\`json
+${JSON.stringify({ invoices: simplifiedInvoices }, null, 2)}
+\`\`\``,
         },
       ],
     };
